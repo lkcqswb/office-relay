@@ -1,7 +1,8 @@
 node_modules/
 .agent-relay/
 .env
+hub/.env
 office-state.json
-office/office-state.json
-office/*.log
+hub/office-state.json
+**/*.log
 *.tmp

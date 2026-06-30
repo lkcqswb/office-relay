@@ -5,9 +5,10 @@
 # on macOS/Windows Docker Desktop, comment out network_mode and uncomment
 # the ports: block below.
 #
-# Set OFFICE_TOKEN in a .env file next to this compose file:
+# Set OFFICE_TOKEN in a .env file next to this compose file (hub/.env):
 #   OFFICE_TOKEN=<long-random-secret>
 # Then:  docker compose up -d
+name: office-relay
 services:
   office-relay:
     build: .

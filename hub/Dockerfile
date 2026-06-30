@@ -1,10 +1,11 @@
-# Minimal, zero-dependency relay. node:alpine keeps the image tiny.
+# Minimal, zero-dependency relay hub. node:alpine keeps the image tiny.
+# Build context is this hub/ directory.
 FROM node:22-alpine
 
 WORKDIR /app
 
-# The relay has no runtime dependencies; copy only what it needs to run.
-COPY office/relay.mjs ./office/relay.mjs
+# The hub has no runtime dependencies; copy only what it needs to run.
+COPY relay.mjs ./relay.mjs
 
 # State lives on a mounted volume so it survives container restarts.
 ENV OFFICE_STATE_PATH=/data/office-state.json \
@@ -18,4 +19,4 @@ EXPOSE 3977
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.OFFICE_PORT||3977)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "office/relay.mjs"]
+CMD ["node", "relay.mjs"]

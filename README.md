@@ -1,56 +1,50 @@
 # Office Relay
 
-Minimal explicit session registry and inbox relay for long-running Claude Code sessions.
+A tiny system that lets long-running Claude Code sessions — across machines — see each
+other and exchange messages, only when you explicitly tell them to.
 
-It has **two parts**:
+It comes in **two halves**:
 
-- **Hub (relay)** — `office/relay.mjs`, run once as a shared server (Docker recommended).
-  This is the exchange / 中转站 that holds the agent list and message inboxes.
-- **Client (CLI)** — `office/office.mjs`, run by each Claude session to register,
-  send messages, and read its inbox. It talks to the hub purely over HTTP and has
-  **no dependency on the hub code** — a joining session only needs this CLI plus the
-  hub's URL and token.
+| Half | Path | What it is | Where it runs |
+|---|---|---|---|
+| **1. Hub** | [`hub/`](hub/) | The exchange (中转站): an HTTP server holding the agent list + inboxes. | **Once**, on a box every machine can reach (a VPS, a LAN host). |
+| **2. MCP** | [`mcp/`](mcp/) | A globally-registered MCP server each Claude session uses to register, send, and read its inbox. | On **every** machine, inside Claude Code. |
 
-Design intent (unchanged):
+You set up the hub once to get an **IP + token**, then register the MCP on each machine
+and hand it that IP + token when a session joins.
 
-- Sessions join only when the user tells them to register.
-- The hub only tracks registered agents and direct messages.
-- It does not scan terminals, create tasks, assign work, or simulate user input.
-- Use `pixtuoid` separately for local pixel-office visualization.
+Design intent: sessions join only when told to; the hub only tracks registered agents
+and direct messages; it never scans terminals, creates tasks, assigns work, or
+simulates input.
 
 ---
 
-## Part 1 — Run the Hub (operator, once)
+## Part 1 — Set up the Hub (once) → get an IP + token
 
-The hub is the only thing that needs to be reachable by every session. Run it on a
-box all your machines can reach (a VPS, a LAN host, etc.).
+Run this on a server every session can reach.
 
 ### Docker (recommended)
 
 ```bash
 git clone https://github.com/lkcqswb/office-relay.git
-cd office-relay
-cp .env.example .env            # set OFFICE_TOKEN to a long random secret
+cd office-relay/hub
+printf 'OFFICE_TOKEN=%s\nOFFICE_PORT=3977\n' "$(openssl rand -hex 24)" > .env   # generate a strong token
 docker compose up -d --build
 docker compose logs -f          # expect: "running at http://0.0.0.0:3977 (auth: on)"
+cat .env                        # note your OFFICE_TOKEN
 ```
 
-- Binds `0.0.0.0:3977` by default and **refuses to start on a public host without
-  `OFFICE_TOKEN`** (override only with `OFFICE_ALLOW_NO_TOKEN=1`).
-- State persists in the `office-data` Docker volume, so restarts keep the agent list.
-- `docker-compose.yml` uses host networking (Linux) so the hub sees real client IPs;
-  there is a commented bridge-mode block for macOS/Windows Docker Desktop.
+- Binds `0.0.0.0:3977` and **refuses to start on a public host without `OFFICE_TOKEN`**
+  (override only with `OFFICE_ALLOW_NO_TOKEN=1`).
+- State persists in the `office-data` Docker volume across restarts.
+- Host networking (Linux) lets the hub see real client IPs; a commented bridge-mode
+  block in `hub/docker-compose.yml` covers macOS/Windows Docker Desktop.
 
-**Open the port** in your cloud firewall / security group (e.g. Tencent Cloud, AWS,
-Aliyun) so clients can reach `:3977`, or front it with HTTPS via Caddy / nginx /
-Cloudflare Tunnel / Tailscale.
+**Open the port** in your cloud firewall / security group (Tencent Cloud, AWS, Aliyun, …)
+so clients can reach `:3977`, or front it with HTTPS (Caddy / nginx / Cloudflare Tunnel /
+Tailscale).
 
-Update the hub after pulling new code:
-
-```bash
-git pull --ff-only      # or rsync your working copy
-docker compose up -d --build
-```
+Update after pulling new code: `git pull --ff-only && docker compose up -d --build`.
 
 ### Without Docker
 
@@ -58,53 +52,62 @@ docker compose up -d --build
 OFFICE_HOST=0.0.0.0 OFFICE_PORT=3977 OFFICE_TOKEN='long-random-secret' npm run office
 ```
 
-(`npm install` is optional — the hub has no runtime dependencies; `pixtuoid` is dev-only.)
+**You now have what every session needs:**
+
+```text
+OFFICE_URL   = http://<server-ip>:3977
+OFFICE_TOKEN = <the token in hub/.env>
+```
 
 ---
 
-## Part 2 — Join from a Claude session (client)
+## Part 2 — Register the MCP (once per machine), then join from any session
 
-Each session points at the hub and authenticates with the shared token:
+Register the MCP server globally so every Claude Code session on this machine has it:
 
 ```bash
-export OFFICE_URL='http://<hub-host>:3977'   # e.g. http://211.159.223.182:3977
-export OFFICE_TOKEN='<same-token-as-the-hub>' # ask the hub operator
+git clone https://github.com/lkcqswb/office-relay.git ~/.office-relay   # if not already
+claude mcp add office-relay --scope user -- node ~/.office-relay/mcp/server.mjs
+claude mcp list      # office-relay → ✔ Connected
 ```
 
-In a project that contains this repo's `CLAUDE.md`, tell Claude:
+Then, in **any** session, just say:
 
 ```text
-Use office relay to register yourself.
+Register me to office relay.
 ```
 
-Or run the client directly (preserving the project path as the agent's cwd):
+The agent will ask you for the machine label, this session's role/duty, and the hub's
+URL + token, then call the `office_register` tool. The URL and token are saved locally
+(`~/.office-relay-agent.json`), so afterwards you only say things like:
+
+```text
+Who else is in the office?            → office_sessions
+Tell the tex session to rebuild.      → office_send
+Any messages for me?                  → office_inbox
+```
+
+### MCP tools
+
+| Tool | Purpose |
+|---|---|
+| `office_register` | Register this session (asks for host, role, url, token). |
+| `office_status` | Show saved identity + hub health (token masked). |
+| `office_sessions` | List all registered sessions. |
+| `office_send` | Message an agent id, `dir:<folder>`, or `all`. |
+| `office_inbox` | Read this session's inbox (optionally mark read). |
+| `office_unregister` | Remove a session from the hub. |
+
+### Optional CLI
+
+`mcp/cli.mjs` is the same functionality as a plain command line (handy for scripts/debug):
 
 ```bash
-OFFICE_AGENT_CWD="$PWD" node ~/.office-relay/office/office.mjs onboard
-```
-
-PowerShell:
-
-```powershell
-$env:OFFICE_AGENT_CWD = (Get-Location).Path
-node "$HOME\.office-relay\office\office.mjs" onboard
-```
-
-If identity details are missing it will ask for: agent id, role, host label,
-capabilities, optional display name. Manual register:
-
-```bash
-node office/office.mjs register linux-baseline-1 "Linux Baseline" \
-  --role baseline --host linux-gpu --capabilities gpu,experiments,logs
-```
-
-### Communicate
-
-```bash
-node office/office.mjs sessions                                   # list registered sessions
-node office/office.mjs send leader linux-baseline-1 "Run baseline A, return metrics."
-node office/office.mjs send-dir leader project-x "message to whoever is in that folder"
-node office/office.mjs inbox leader --mark-read                   # read + clear unread
+export OFFICE_URL='http://<server-ip>:3977' OFFICE_TOKEN='<token>'
+node ~/.office-relay/mcp/cli.mjs register linux-baseline-1 "Linux Baseline" --role baseline --host linux-gpu --capabilities gpu,logs
+node ~/.office-relay/mcp/cli.mjs sessions
+node ~/.office-relay/mcp/cli.mjs send leader linux-baseline-1 "Run baseline A."
+node ~/.office-relay/mcp/cli.mjs inbox leader --mark-read
 ```
 
 ---
@@ -113,36 +116,34 @@ node office/office.mjs inbox leader --mark-read                   # read + clear
 
 | Variable | Side | Default | Meaning |
 |---|---|---|---|
-| `OFFICE_TOKEN` | both | _(empty)_ | Bearer token. **Required** on a public hub; clients must send the same value. |
-| `OFFICE_URL` | client | `http://127.0.0.1:3977` | Hub base URL. |
+| `OFFICE_TOKEN` | both | _(empty)_ | Bearer token. **Required** on a public hub; clients send the same value. |
+| `OFFICE_URL` | client | `http://127.0.0.1:3977` | Hub base URL (CLI / saved by the MCP at register time). |
+| `OFFICE_CONFIG` | mcp | `~/.office-relay-agent.json` | Where the MCP saves this session's identity + connection. |
 | `OFFICE_HOST` | hub | `127.0.0.1` | Bind address. `0.0.0.0` to expose. |
 | `OFFICE_PORT` | hub | `3977` | Bind port. |
-| `OFFICE_STATE_PATH` | hub | next to `relay.mjs` | Where state is persisted (Docker: `/data/office-state.json`). |
+| `OFFICE_STATE_PATH` | hub | next to `relay.mjs` | Persisted state (Docker: `/data/office-state.json`). |
 | `OFFICE_RATE_LIMIT` | hub | `240` | Max API requests/minute/IP (429 over limit). |
 | `OFFICE_MAX_BODY` | hub | `65536` | Max request body bytes (413 over limit). |
-| `OFFICE_TRUST_PROXY` | hub | off | Set `1` to read client IP from `X-Forwarded-For`. |
-| `OFFICE_IDLE_MS` / `OFFICE_OFFLINE_MS` | hub | `45000` / `180000` | Mark agent idle/offline after inactivity. |
+| `OFFICE_TRUST_PROXY` | hub | off | `1` to read client IP from `X-Forwarded-For`. |
+| `OFFICE_IDLE_MS` / `OFFICE_OFFLINE_MS` | hub | `45000` / `180000` | Mark agent idle / offline after inactivity. |
 | `OFFICE_AGENT_TTL_MS` | hub | `86400000` | Prune agents unseen this long (24h). |
 | `OFFICE_MESSAGE_TTL_MS` / `OFFICE_UNREAD_TTL_MS` | hub | `86400000` / `604800000` | Drop read msgs after 24h, unread after 7d. |
 | `OFFICE_MESSAGES_MAX` | hub | `5000` | Hard cap on retained messages. |
-| `OFFICE_AGENT_CWD` | client | `process.cwd()` | Project dir advertised as the agent's location. |
-
----
 
 ## Web UI
 
-Open the hub root URL to inspect registered sessions and remove stale ones:
+Open the hub root URL to inspect registered sessions and remove stale ones; paste the
+token into the field at the top.
 
 ```text
-http://<hub-host>:3977/
+http://<server-ip>:3977/
 ```
 
-Paste the token into the field at the top. It is an admin list, not the pixel office;
-use `pixtuoid` for the visual office (`npm run pix:setup`).
+It is an admin list, not the pixel office; use `pixtuoid` for the visual office.
 
 ## API
 
-All `/api/*` except `/api/health` require the Bearer token when one is configured, are
+All `/api/*` except `/api/health` require the Bearer token when configured, are
 rate-limited per client IP, and reject bodies over `OFFICE_MAX_BODY`.
 
 - `GET /api/health` — liveness, no auth.
@@ -156,8 +157,7 @@ rate-limited per client IP, and reject bodies over `OFFICE_MAX_BODY`.
 
 - Single in-memory state with atomic (`tmp`+`rename`) persistence — no lost-update
   races when many sessions register/send at once.
-- Forced token on public bind, timing-safe token comparison, per-IP rate limit, body
-  size cap.
+- Forced token on public bind, timing-safe token comparison, per-IP rate limit, body cap.
 - Message retention (TTL + hard cap) and automatic agent idle/offline/prune, so the
   state file does not grow without bound.
 
