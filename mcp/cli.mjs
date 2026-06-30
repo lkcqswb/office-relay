@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { loadConfig, getInbox, markRead } from "./client.mjs";
+
 function readOption(name, fallback = "") {
   const prefix = `--${name}=`;
   const inline = process.argv.slice(2).find((arg) => arg.startsWith(prefix));
@@ -42,31 +44,32 @@ async function api(path, options = {}) {
 
 function usage() {
   console.log(`Usage:
-  node office/office.mjs onboard
-  node office/office.mjs doctor
-  node office/office.mjs register --help
-  node office/office.mjs register-template [agent-id] [display-name]
-  node office/office.mjs register <agent-id> [display-name]
-  node office/office.mjs unregister <agent-id>
-  node office/office.mjs heartbeat <agent-id> [status]
-  node office/office.mjs sessions
-  node office/office.mjs send <from> <to> <message...>
-  node office/office.mjs send-dir <from> <directory-query> <message...>
-  node office/office.mjs inbox <agent-id> [--all] [--mark-read]
-  node office/office.mjs read <agent-id> [message-id...]
-  node office/office.mjs state
+  node mcp/cli.mjs onboard
+  node mcp/cli.mjs doctor
+  node mcp/cli.mjs register --help
+  node mcp/cli.mjs register-template [agent-id] [display-name]
+  node mcp/cli.mjs register <agent-id> [display-name]
+  node mcp/cli.mjs unregister <agent-id>
+  node mcp/cli.mjs heartbeat <agent-id> [status]
+  node mcp/cli.mjs sessions
+  node mcp/cli.mjs send <from> <to> <message...>
+  node mcp/cli.mjs send-dir <from> <directory-query> <message...>
+  node mcp/cli.mjs inbox <agent-id> [--all] [--mark-read]
+  node mcp/cli.mjs watch [agent-id] [--interval 10] [--once]
+  node mcp/cli.mjs read <agent-id> [message-id...]
+  node mcp/cli.mjs state
 
 Examples:
-  node office/office.mjs onboard
-  node office/office.mjs doctor
-  node office/office.mjs register --help
-  node office/office.mjs register-template mac-tex-1 "Mac TeX"
-  node office/office.mjs register claude-a "Claude A" --role coordinator --host win --capabilities planning,coding
-  node office/office.mjs unregister claude-a
-  node office/office.mjs sessions
-  node office/office.mjs send claude-a claude-b "hello from A"
-  node office/office.mjs send-dir claude-a "project-name" "hello to whoever is in that folder"
-  node office/office.mjs inbox claude-b --mark-read
+  node mcp/cli.mjs onboard
+  node mcp/cli.mjs doctor
+  node mcp/cli.mjs register --help
+  node mcp/cli.mjs register-template mac-tex-1 "Mac TeX"
+  node mcp/cli.mjs register claude-a "Claude A" --role coordinator --host win --capabilities planning,coding
+  node mcp/cli.mjs unregister claude-a
+  node mcp/cli.mjs sessions
+  node mcp/cli.mjs send claude-a claude-b "hello from A"
+  node mcp/cli.mjs send-dir claude-a "project-name" "hello to whoever is in that folder"
+  node mcp/cli.mjs inbox claude-b --mark-read
 `);
 }
 
@@ -90,12 +93,12 @@ If the user asked you to register but did not provide details, ask these short q
   5. Optional display name?
 
 Then run:
-  node office/office.mjs register <agent-id> [display-name] --role <role> --host <host> --capabilities <comma-list>
+  node mcp/cli.mjs register <agent-id> [display-name] --role <role> --host <host> --capabilities <comma-list>
 
 After registering:
-  node office/office.mjs sessions
-  node office/office.mjs inbox <agent-id> --mark-read
-  node office/office.mjs send <agent-id> <target-agent> "<message>"
+  node mcp/cli.mjs sessions
+  node mcp/cli.mjs inbox <agent-id> --mark-read
+  node mcp/cli.mjs send <agent-id> <target-agent> "<message>"
 `);
 }
 
@@ -117,16 +120,16 @@ The current working directory is captured automatically:
   ${cwd}
 
 Command shape:
-  node office/office.mjs register <agent-id> [display-name] --role <role> --host <host> --capabilities <comma-list>
+  node mcp/cli.mjs register <agent-id> [display-name] --role <role> --host <host> --capabilities <comma-list>
 
 Examples:
-  node office/office.mjs register linux-baseline-1 "Linux Baseline" --role baseline --host linux-gpu --capabilities gpu,experiments,logs
-  node office/office.mjs register mac-tex-1 "Mac TeX" --role tex --host macbook --capabilities tex,bibtex,writing
+  node mcp/cli.mjs register linux-baseline-1 "Linux Baseline" --role baseline --host linux-gpu --capabilities gpu,experiments,logs
+  node mcp/cli.mjs register mac-tex-1 "Mac TeX" --role tex --host macbook --capabilities tex,bibtex,writing
 
 After registering:
-  node office/office.mjs sessions
-  node office/office.mjs inbox <agent-id> --mark-read
-  node office/office.mjs send <agent-id> <target-agent> "<message>"
+  node mcp/cli.mjs sessions
+  node mcp/cli.mjs inbox <agent-id> --mark-read
+  node mcp/cli.mjs send <agent-id> <target-agent> "<message>"
 `);
 }
 
@@ -142,7 +145,7 @@ function printRegisterTemplate(id = "<agent-id>", name = "<display-name>") {
   console.log(`Current cwd:   ${cwd}`);
   console.log("");
   console.log("Fill in any placeholders, then run:");
-  console.log(`node office/office.mjs register ${id} ${shellQuote(name)} --role ${role} --host ${host} --capabilities ${capabilities}`);
+  console.log(`node mcp/cli.mjs register ${id} ${shellQuote(name)} --role ${role} --host ${host} --capabilities ${capabilities}`);
 }
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -255,6 +258,41 @@ try {
         body: JSON.stringify({ agent, ids: messages.map((m) => m.id) }),
       });
       console.log(`Marked ${messages.length} message(s) read.`);
+    }
+  } else if (cmd === "watch") {
+    // Inbox monitor. Polls for unread; on arrival it prints, marks them read, and
+    // EXITS — in Claude Code a backgrounded command exiting re-invokes the agent,
+    // so this is how a session "wakes up" to a new message. Then relaunch it.
+    const cfg = await loadConfig();
+    const id = stripOptions(args)[0] || cfg.agent?.id;
+    if (!id) throw new Error("agent-id required (or register first so it is saved)");
+    const url = process.env.OFFICE_URL || cfg.url || baseUrl;
+    const token = process.env.OFFICE_TOKEN || cfg.token || "";
+    const intervalMs = Math.max(2, Number(readOption("interval")) || 10) * 1000;
+    const once = args.includes("--once");
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    for (;;) {
+      let messages = null;
+      try {
+        messages = await getInbox(url, token, id, true);
+      } catch (error) {
+        console.error(`office: ${error.message}`);
+      }
+      if (messages && messages.length) {
+        console.log(`\u{1F4EC} ${messages.length} new message(s) for ${id}:`);
+        for (const m of messages) {
+          console.log(`[${m.id}] ${new Date(m.createdAt).toLocaleTimeString()} ${m.from} -> ${m.to}`);
+          console.log(m.body);
+          console.log("");
+        }
+        await markRead(url, token, id, messages.map((m) => m.id)).catch(() => {});
+        break;
+      }
+      if (once) {
+        console.log(`No new messages for ${id}.`);
+        break;
+      }
+      await sleep(intervalMs);
     }
   } else if (cmd === "read") {
     const [agent, ...ids] = args;

@@ -20,7 +20,13 @@ Registration and messaging go through the **`office-relay` MCP tools**
    - also choose a short **agentId**; **capabilities** and **displayName** are optional.
 3. Call `office_register` with those arguments. The url and token are saved locally, so
    later tools do not need them again.
-4. Call `office_sessions` and summarize who else is registered.
+4. **Start the inbox monitor.** `office_register`'s result prints the exact command;
+   run it as a **background** process: `node <repo>/mcp/cli.mjs watch <agentId>`. It
+   polls the inbox and exits (printing the message) the moment mail arrives — in Claude
+   Code a backgrounded command exiting re-invokes you, so this is how you "wake up" to a
+   message. When it surfaces one, read/handle it, then launch `watch` again to keep
+   monitoring. (Or, if you prefer, periodically call `office_inbox` yourself.)
+5. Call `office_sessions` and summarize who else is registered.
 
 If the MCP server is not available, fall back to the CLI:
 `OFFICE_URL=... OFFICE_TOKEN=... node mcp/cli.mjs register <id> --role <role> --host <host>`.

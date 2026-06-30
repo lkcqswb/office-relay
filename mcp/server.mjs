@@ -13,6 +13,7 @@
 // Protocol: MCP over stdio = newline-delimited JSON-RPC 2.0 messages. Nothing except
 // protocol messages may be written to stdout; logs go to stderr.
 
+import { fileURLToPath } from "node:url";
 import {
   loadConfig,
   saveConfig,
@@ -29,6 +30,7 @@ import {
 
 const SERVER_INFO = { name: "office-relay", version: "0.2.0" };
 const DEFAULT_PROTOCOL = "2025-06-18";
+const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
 // Presence: once THIS session registers, keep it "online" in the office with a
 // periodic heartbeat, and remove it when the session/process ends. Only the
@@ -88,7 +90,9 @@ const TOOLS = [
       "(2) role = this session's duty/positioning (e.g. leader, baseline, tex, reviewer); " +
       "(3) url = the hub address as http://IP:PORT; (4) token = the hub's shared token. " +
       "Also pick a short agentId. Capabilities and displayName are optional. " +
-      "The url and token are saved locally so later tools do not need them again.",
+      "The url and token are saved locally so later tools do not need them again. " +
+      "AFTER registering, start an inbox monitor (the tool result tells you the exact " +
+      "background command) so you notice messages other sessions send you.",
     inputSchema: {
       type: "object",
       properties: {
@@ -191,7 +195,13 @@ async function callTool(name, args = {}) {
       });
       startPresence(args.url, args.token, agent); // keep online + auto-leave on exit
       return toolText(
-        `Registered "${agent.id}" with hub ${args.url}.\n` + JSON.stringify(result, null, 2)
+        `Registered "${agent.id}" with hub ${args.url}.\n` +
+          JSON.stringify(result, null, 2) +
+          "\n\nNEXT — start your inbox monitor so you notice incoming messages. Run this " +
+          "as a BACKGROUND command; it polls your inbox and exits (printing the message) " +
+          "the moment mail arrives, which wakes you to respond — then relaunch it:\n" +
+          `  node ${CLI_PATH} watch ${agent.id}\n` +
+          "When it surfaces a message, handle it, then start `watch` again to keep monitoring."
       );
     }
 
