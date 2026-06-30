@@ -1,6 +1,6 @@
 # Office Relay
 
-When the user says "use office relay to register yourself" or "用 office relay 注册自己", register this Claude Code session with the office relay.
+When the user says "use office relay to register yourself", register this Claude Code session with the office relay.
 
 Follow this workflow:
 

@@ -1,4 +1,4 @@
-# Office Relay
+﻿# Office Relay
 
 Minimal explicit session registry and inbox relay for long-running Claude Code sessions.
 
@@ -48,7 +48,7 @@ Use HTTPS through Caddy, nginx, Cloudflare Tunnel, or Tailscale Funnel when expo
 In a project that contains this repo's `CLAUDE.md`, tell Claude:
 
 ```text
-用 office relay 注册自己
+Use office relay to register yourself.
 ```
 
 Claude should run:
@@ -132,3 +132,4 @@ npm run pix -- run
 ## License
 
 MIT
+
