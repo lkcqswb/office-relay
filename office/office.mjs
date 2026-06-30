@@ -1,9 +1,5 @@
 #!/usr/bin/env node
 
-const baseUrl = process.env.OFFICE_URL || "http://127.0.0.1:3977";
-const cwd = process.cwd();
-const defaultHost = process.env.OFFICE_AGENT_HOST || process.env.COMPUTERNAME || process.env.HOSTNAME || "unknown-host";
-
 function readOption(name, fallback = "") {
   const prefix = `--${name}=`;
   const inline = process.argv.slice(2).find((arg) => arg.startsWith(prefix));
@@ -12,6 +8,10 @@ function readOption(name, fallback = "") {
   if (index >= 0) return process.argv.slice(2)[index + 1] || fallback;
   return fallback;
 }
+
+const baseUrl = process.env.OFFICE_URL || "http://127.0.0.1:3977";
+const cwd = readOption("cwd") || process.env.OFFICE_AGENT_CWD || process.cwd();
+const defaultHost = process.env.OFFICE_AGENT_HOST || process.env.COMPUTERNAME || process.env.HOSTNAME || "unknown-host";
 
 function stripOptions(args) {
   const output = [];

@@ -57,6 +57,19 @@ Claude should run:
 node office/office.mjs onboard
 ```
 
+For a global install cloned outside the current project, preserve the current project path:
+
+```bash
+OFFICE_AGENT_CWD="$PWD" node ~/.office-relay/office/office.mjs onboard
+```
+
+PowerShell:
+
+```powershell
+$env:OFFICE_AGENT_CWD = (Get-Location).Path
+node "$HOME\.office-relay\office\office.mjs" onboard
+```
+
 If identity details are missing, it will ask for:
 
 - agent id
